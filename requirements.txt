@@ -1,0 +1,4 @@
+flapi
+spotipy
+dotenv
+requests
