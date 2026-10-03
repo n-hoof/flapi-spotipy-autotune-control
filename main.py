@@ -14,22 +14,20 @@ redirect_uri=os.getenv("REDIRECT_URI")
 RECCO_BEATS_BASE_URL='https://api.reccobeats.com/v1/audio-features?ids='
 RECCO_BEATS_KEY_MAP={
     0: "C",
-    1: "C#",
     1: "Db",
     2: "D",
-    3: "D#",
     3: "Eb",
     4: "E",
     5: "F",
-    6: "F#",
     6: "Gb",
     7: "G",
-    8: "G#",
     8: "Ab",
     9: "A",
-    10: "A#",
     10: "Bb",
-    11: "B"
+    11: "B",
+    12: "C",
+    13: "Db",
+    14: "D",
 }
 
 def create_spotify_connection():
@@ -54,12 +52,23 @@ def get_track_info(track):
 def get_track_key(track_id):
     recco_beats_url = RECCO_BEATS_BASE_URL + track_id
     try:
-        response = requests.get(recco_beats_url).json()
-        key_int = response["content"][0]["key"]
+        response = requests.get(recco_beats_url, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+
+        key_int = data["content"][0]["key"]
+        key_mode = data["content"][0]["mode"]
+        if key_mode == 0:
+            key_int += 3
         key_str = RECCO_BEATS_KEY_MAP[key_int]
+
         return key_str
-    except:
-        print("Could not fetch key from ReccoBeats API...")
+    except requests.RequestException as e:
+        print(f"ReccoBeats request failed: {e}")
+        return None
+    except (ValueError, KeyError, IndexError, TypeError) as e:
+        print(f"Unexpected ReccoBeats response: {e}")
+        return None
 
 
 def main():
@@ -67,9 +76,8 @@ def main():
 
     previous_track_id = None
     current_track_id = None
-    playing = True
 
-    while playing:
+    while True:
         current_track = sp.current_user_playing_track()
         current_track_info = get_track_info(current_track)
 
@@ -77,7 +85,7 @@ def main():
             artist, song, current_track_id = current_track_info
 
             if current_track_id != previous_track_id:
-                print(f"Track changed to: {song} - {artist} | id: {current_track_id}")
+                print(f"Track changed to: {song} - {artist}")
                 track_key = get_track_key(current_track_id)
                 print(f"key: {track_key}")
                 previous_track_id = current_track_id
@@ -86,9 +94,9 @@ def main():
 
         else:
             print("No track currently playing")
-            playing = False
+            break
 
-        time.sleep(1)
+        time.sleep(5)
 
 if __name__=="__main__":
     main()
