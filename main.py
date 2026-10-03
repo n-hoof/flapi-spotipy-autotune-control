@@ -4,15 +4,14 @@ from dotenv import load_dotenv
 import os
 import requests
 import time
+from dataclasses import dataclass
 
 load_dotenv()
 
-client_id=os.getenv("CLIENT_ID")
-client_secret=os.getenv("CLIENT_SECRET")
-redirect_uri=os.getenv("REDIRECT_URI")
-
-RECCO_BEATS_BASE_URL='https://api.reccobeats.com/v1/audio-features?ids='
-RECCO_BEATS_KEY_MAP={
+MAJOR_MODE = 1
+MINOR_MODE = 0
+RECCO_BEATS_URL = "https://api.reccobeats.com/v1/audio-features"
+RECCO_BEATS_KEY_MAP = {
     0: "C",
     1: "Db",
     2: "D",
@@ -24,45 +23,75 @@ RECCO_BEATS_KEY_MAP={
     8: "Ab",
     9: "A",
     10: "Bb",
-    11: "B",
-    12: "C",
-    13: "Db",
-    14: "D",
+    11: "B"
 }
 
-def create_spotify_connection():
-    scope='user-read-currently-playing'
+@dataclass(frozen=True)
+class Track:
+    id: str
+    name: str
+    artist: str
+
+def get_required_env(name: str) -> str:
+    value = os.getenv(name)
+
+    if not value:
+        raise RuntimeError(
+            f"Missing required environment variable: {name}"
+        )
+
+    return value
+
+def create_spotify_connection() -> spotipy.Spotify:
     sp_oauth = SpotifyOAuth(
-        client_id=client_id,
-        client_secret=client_secret,
-        redirect_uri=redirect_uri,
-        scope=scope
+        client_id=get_required_env("CLIENT_ID"),
+        client_secret=get_required_env("CLIENT_SECRET"),
+        redirect_uri=get_required_env("REDIRECT_URI"),
+        scope="user-read-currently-playing"
     )
-    sp = spotipy.Spotify(auth_manager=sp_oauth)
-    return sp
 
-def get_track_info(track):
-    if track:
-        artist = track["item"]["artists"][0]["name"]
-        song = track["item"]["name"]
-        track_id = track["item"]["id"]
-        return (artist, song, track_id)
-    return None
+    return spotipy.Spotify(auth_manager=sp_oauth)
 
-def get_track_key(track_id):
-    recco_beats_url = RECCO_BEATS_BASE_URL + track_id
+def get_current_track(sp: spotipy.Spotify) ->  Track | None:
+    current_track = sp.current_user_playing_track()
+
+    if not current_track:
+        return None
+
+    item = current_track.get("item")
+
+    if not item or item.get("type") != "track":
+        return None
+
+    return Track(
+        id = item["id"],
+        name = item["name"],
+        artist = item["artists"][0]["name"]
+    )
+
+def get_major_key(key_int: int, mode: int) -> str:
+    #Convert minor keys to major
+    if mode == MINOR_MODE:
+        key_int = (key_int + 3) % 12
+
+    return RECCO_BEATS_KEY_MAP[key_int]
+
+def get_track_key(track_id: str, session: requests.Session) -> str | None:
     try:
-        response = requests.get(recco_beats_url, timeout=5)
+        response = session.get(RECCO_BEATS_URL, params={"ids": track_id}, timeout=5)
         response.raise_for_status()
+        
         data = response.json()
+        content = data["content"]
+        
+        if not content:
+            return None
 
-        key_int = data["content"][0]["key"]
-        key_mode = data["content"][0]["mode"]
-        if key_mode == 0:
-            key_int += 3
-        key_str = RECCO_BEATS_KEY_MAP[key_int]
+        key_int = content[0]["key"]
+        key_mode = content[0]["mode"]
 
-        return key_str
+        return get_major_key(key_int, key_mode)
+    
     except requests.RequestException as e:
         print(f"ReccoBeats request failed: {e}")
         return None
@@ -73,30 +102,31 @@ def get_track_key(track_id):
 
 def main():
     sp = create_spotify_connection()
+    http = requests.Session()
 
     previous_track_id = None
-    current_track_id = None
 
     while True:
-        current_track = sp.current_user_playing_track()
-        current_track_info = get_track_info(current_track)
+        try:
+            current_track = get_current_track(sp)
 
-        if current_track_info is not None:
-            artist, song, current_track_id = current_track_info
+            if current_track is None:
+                print("No track currently playing")
+                break
 
-            if current_track_id != previous_track_id:
-                print(f"Track changed to: {song} - {artist}")
-                track_key = get_track_key(current_track_id)
+            if current_track.id != previous_track_id:
+                print(f"Track changed to: {current_track.name} - {current_track.artist}")
+                track_key = get_track_key(current_track.id, http)
+                if track_key is None:
+                    print(f"Key not found")
                 print(f"key: {track_key}")
-                previous_track_id = current_track_id
-            else:
-                print("Track has not changed")
+                previous_track_id = current_track.id
 
-        else:
-            print("No track currently playing")
-            break
+            time.sleep(5)
 
-        time.sleep(5)
+        except Exception:
+            raise
 
+        
 if __name__=="__main__":
     main()
