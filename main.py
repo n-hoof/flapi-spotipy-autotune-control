@@ -5,6 +5,7 @@ import os
 import requests
 import time
 from dataclasses import dataclass
+from autotune_controls import set_up_flapi_connection, change_key
 
 load_dotenv()
 
@@ -104,28 +105,32 @@ def main():
     sp = create_spotify_connection()
     http = requests.Session()
 
-    previous_track_id = None
+    if set_up_flapi_connection():
 
-    while True:
-        try:
-            current_track = get_current_track(sp)
+        previous_track_id = None
 
-            if current_track is None:
-                print("No track currently playing")
-                break
+        while True:
+            try:
+                current_track = get_current_track(sp)
 
-            if current_track.id != previous_track_id:
-                print(f"Track changed to: {current_track.name} - {current_track.artist}")
-                track_key = get_track_key(current_track.id, http)
-                if track_key is None:
-                    print(f"Key not found")
-                print(f"key: {track_key}")
-                previous_track_id = current_track.id
+                if current_track is None:
+                    print("No track currently playing")
+                    break
 
-            time.sleep(5)
+                if current_track.id != previous_track_id:
+                    print(f"Track changed to: {current_track.name} - {current_track.artist}")
+                    track_key = get_track_key(current_track.id, http)
 
-        except Exception:
-            raise
+                    if track_key is None:
+                        print(f"Key not found")
+
+                    change_key(track_key)
+                    previous_track_id = current_track.id
+
+                time.sleep(5)
+
+            except Exception:
+                raise
 
         
 if __name__=="__main__":
